@@ -1,8 +1,7 @@
-//Temp.&Feuchte Sensor DHT11
-
 /*--------------------------------------- INCLUDES --------------------------------------------- */
-// Include library for Temp/Humidity sensor
-#include <DHT_U.h>
+// Include library for Temp sensor incl. one wire bus
+#include <DallasTemperature.h>
+#include <OneWire.h>
 
 // Include library for LORAWAN connection
 #include <lmic.h>
@@ -13,32 +12,40 @@
 // Include hardware abstraction layer for arduino environment
 #include <hal/hal.h>
 
+// Include library for HX711 (weightsensor)
+#include <HX711.h>
+
 
 
 /*---------------------------------------- DEFINES ---------------------------------------------- */
-// Temp/Humidity sensor
-#define DHTPIN 5           // Digital pin connected to the DHT sensor 
-#define DHTTYPE    DHT11   // Type DHT 11 is used as sensor
+// Temp sensor
+#define ONE_WIRE_BUS 5
+
+// HX711 circuit wiring
+#define LOADCELL_DOUT_PIN 3
+#define LOADCELL_SCK_PIN 4
+
+// HX711 Adjustment
+#define LOADCELL_DIVIDER 23.01458f
+#define LOADCELL_OFFSET -6826
 
 
 
 /*------------------------------------ GLOBAL VARIABLES ----------------------------------------- */
 // Credentials which are necessary to connect to TTN (modify if you use other TTN account or device)
-static const u1_t NWKSKEY[16] = { 0x76, 0x99, 0xE0, 0x63, 0x90, 0x0A, 0x93, 0x3F, 0x7D, 0x72, 0x8D, 0x7E, 0xE4, 0x5C, 0x5B, 0x07 };
-static const u1_t APPSKEY[16] = { 0xA3, 0xD2, 0x85, 0xB8, 0x09, 0xBD, 0x80, 0xDE, 0xD4, 0x85, 0x47, 0x8E, 0xF2, 0xAA, 0x5B, 0xF7 };
-static const u4_t DEVADDR = 0x260117B6 ;
+static const u1_t NWKSKEY[16] = { 0x62, 0xFC, 0xCE, 0x14, 0x1C, 0x95, 0xBE, 0xD7, 0x21, 0x08, 0x27, 0xAF, 0x03, 0x84, 0x85, 0xDA };
+static const u1_t APPSKEY[16] = { 0x74, 0xF4, 0x42, 0x70, 0x7B, 0x8C, 0x02, 0x49, 0x6F, 0x23, 0x0B, 0x88, 0x7B, 0x37, 0xAD, 0x1C };
+static const u4_t DEVADDR = 0x2601179E ;
 
 // Schedule TX messages over Lora within defined seconds
 const unsigned TX_INTERVAL = 150; 
 
-// Delay which is minimal needed between sensor readings
-uint32_t delayMS;
+// Instantiate object for Temp sensor and one wire bus
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
 
-// Instantiate object for Temp/Humidity sensor class
-DHT_Unified dht(DHTPIN, DHTTYPE); 
-
-// Instantiate object for DHT sensor which is used to read out infos from library
-sensor_t sensor;
+// Instantiate object for HX711
+HX711 loadcell;
 
 // Instantiate Cayenne format object with maximum of 51 bytes lenght
 CayenneLPP lpp(51);
@@ -78,41 +85,12 @@ void os_getDevKey (u1_t* buf) { }
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void setup() {
 	
-	// Initialize serial interface with 9600 Baud-Rate
+	  // Initialize serial interface with 9600 Baud-Rate
     Serial.begin(9600);
-    Serial.println(F("Starting..."));
-	
-	// Start Temp/Humidity sensor
-    dht.begin(); //DHT11 Sensor starten
+    Serial.println(F("Starting ..."));
+
+    Serial.println(F("Initialize LMIC ..."));
     
-	// Get all data of temperature sensor and send it over the serial interface
-    dht.temperature().getSensor(&sensor);
-    Serial.println(F("------------------------------------"));
-    Serial.println(F("Temperature Sensor"));
-    Serial.print  (F("Sensor Type: ")); Serial.println(sensor.name);
-    Serial.print  (F("Driver Ver:  ")); Serial.println(sensor.version);
-    Serial.print  (F("Unique ID:   ")); Serial.println(sensor.sensor_id);
-    Serial.print  (F("Max Value:   ")); Serial.print(sensor.max_value); Serial.println(F("°C"));
-    Serial.print  (F("Min Value:   ")); Serial.print(sensor.min_value); Serial.println(F("°C"));
-    Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("°C"));
-    Serial.println(F("------------------------------------"));
-	
-	
-    // Get all data of humidity sensor and send it over the serial interface
-    dht.humidity().getSensor(&sensor);
-    Serial.println(F("Humidity Sensor"));
-    Serial.print  (F("Sensor Type: ")); Serial.println(sensor.name);
-    Serial.print  (F("Driver Ver:  ")); Serial.println(sensor.version);
-    Serial.print  (F("Unique ID:   ")); Serial.println(sensor.sensor_id);
-    Serial.print  (F("Max Value:   ")); Serial.print(sensor.max_value); Serial.println(F("%"));
-    Serial.print  (F("Min Value:   ")); Serial.print(sensor.min_value); Serial.println(F("%"));
-    Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("%"));
-    Serial.println(F("------------------------------------"));
-    
-	
-    // Set delay between sensor readings based on sensor details.
-    delayMS = sensor.min_delay / 1000;
-  
     // Initialize LMIC lib
     os_init();
 
@@ -131,6 +109,20 @@ void setup() {
     // Set data rate and transmit power for uplink (note: txpow seems to be ignored by the library)
     LMIC_setDrTxpow(DR_SF12,14);
 
+    Serial.println(F("Initialize Temperature Sensor ..."));
+        
+    // Temp sensor begin
+    sensors.begin();
+
+    Serial.println(F("Initialize weight sensor ..."));
+        
+    // HX 711 begin
+    loadcell.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN); 
+    loadcell.set_scale(LOADCELL_DIVIDER);                      // this value is obtained by calibrating the scale with known weights; see the README for details
+    loadcell.set_offset(LOADCELL_OFFSET * LOADCELL_DIVIDER);
+
+    //loadcell.tare();
+
     // Start job manually once; afterwards it will be started every defined seconds (see variable TX_INTERVAL )
     do_send(&sendjob);
 }
@@ -142,7 +134,11 @@ void setup() {
 void loop() {   
 
 	// Let LMIC run in loop
-    os_runloop_once();      
+  os_runloop_once(); 
+
+  //Serial.println(loadcell.read_average(5));
+  Serial.println(loadcell.get_units(10), 2);
+  delay(500);
 }
 
 
@@ -151,14 +147,14 @@ void loop() {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void onEvent (ev_t ev) {
 	
-	// If the event was trigger by completing a sendjob 
-    if (ev == EV_TXCOMPLETE) {
-		
-        Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
-		
-        // Schedule next transmission
-        os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
-    }
+  // If the event was trigger by completing a sendjob 
+  if (ev == EV_TXCOMPLETE) 
+  {
+      Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
+	
+      // Schedule next transmission
+      os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
+  }
 }
 
 
@@ -166,45 +162,13 @@ void onEvent (ev_t ev) {
 // do_send is called manually or automatically by the LMIC OS every time a timer elapses TX_INTERVAL seconds
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void do_send(osjob_t* j){
-	// Instantiate float variables for temp and humidity value
+	  // Instantiate float variables for temp and humidity value
     float temperature;
-    float humidity;
 
-    // Instantiate sensor event object
-    sensors_event_t event;
-
-    // Minimum delay between measurements.
-	delay(delayMS);
-  
-  
-	// Get temperature data 
-	dht.temperature().getEvent(&event);
-	if (isnan(event.temperature)) 
-	{
-		Serial.println(F("Error reading temperature!"));
-	}
-	else 
-	{
-		Serial.print(F("Temperature: "));
-		Serial.print(event.temperature);
-		Serial.println(F("°C"));
-		temperature = event.temperature;
-	}
-	
-	
-	// Get humidity data
-	dht.humidity().getEvent(&event);
-	if (isnan(event.relative_humidity)) 
-	{
-		Serial.println(F("Error reading humidity!"));
-	}
-	else 
-	{
-		Serial.print(F("Humidity: "));
-		Serial.print(event.relative_humidity);
-		Serial.println(F("%"));
-		humidity = event.relative_humidity;
-	}
+    // Send the command to get temperatures
+    sensors.requestTemperatures();
+    temperature = sensors.getTempCByIndex(0);
+    Serial.println(temperature);
    
     // Check if there is not a current TX/RX job running
     if (LMIC.opmode & OP_TXRXPEND) 
@@ -216,7 +180,7 @@ void do_send(osjob_t* j){
         // Prepare upstream data transmission at the next possible time.
         lpp.reset();
         lpp.addTemperature(1, temperature);
-        lpp.addRelativeHumidity(2, humidity);
+        //lpp.addRelativeHumidity(2, humidity);
         
         LMIC_setTxData2(1, lpp.getBuffer(), lpp.getSize(), 0);
         Serial.println(F("Sending uplink packet..."));
