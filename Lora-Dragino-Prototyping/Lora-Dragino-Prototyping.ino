@@ -26,7 +26,7 @@
 #define LOADCELL_SCK_PIN 4
 
 // Timer IC
-#define TIMER_DONE 1
+#define TIMER_DONE A1
 
 // Battery Meaurement
 #define BATTERY_VOLTAGE A0
@@ -42,9 +42,9 @@
 
 /*------------------------------------ GLOBAL VARIABLES ----------------------------------------- */
 // Credentials which are necessary to connect to TTN (modify if you use other TTN account or device)
-static const u1_t NWKSKEY[16] = { 0x62, 0xFC, 0xCE, 0x14, 0x1C, 0x95, 0xBE, 0xD7, 0x21, 0x08, 0x27, 0xAF, 0x03, 0x84, 0x85, 0xDA };
-static const u1_t APPSKEY[16] = { 0x74, 0xF4, 0x42, 0x70, 0x7B, 0x8C, 0x02, 0x49, 0x6F, 0x23, 0x0B, 0x88, 0x7B, 0x37, 0xAD, 0x1C };
-static const u4_t DEVADDR = 0x2601179E ;
+static const u1_t NWKSKEY[16] = { 0xB9, 0xCE, 0x75, 0x89, 0xB5, 0x91, 0x7B, 0xE9, 0xA4, 0xC6, 0xAB, 0x94, 0xE6, 0xBA, 0x8D, 0x83 };
+static const u1_t APPSKEY[16] = { 0xB8, 0x54, 0x5D, 0x8F, 0xE1, 0x0A, 0x7C, 0x04, 0x50, 0x1D, 0xCD, 0x21, 0x97, 0x74, 0xF6, 0x0A };
+static const u4_t DEVADDR = 0x26011FBC;
 
 // Schedule TX messages over Lora within defined seconds
 const unsigned TX_INTERVAL = 150; 
@@ -103,10 +103,10 @@ void setup() {
     Serial.println(F("Starting ..."));
 
     Serial.println(F("Initialize LMIC ..."));
-    
+
     // Initialize LMIC lib
     os_init();
-
+    
     // Reset the MAC state. Session and pending data transfers will be discarded.
     LMIC_reset();
 
@@ -118,6 +118,8 @@ void setup() {
 
     // TTN uses SF9 for its RX2 window.
     LMIC.dn2Dr = DR_SF9;
+
+    //LMIC_setClockError(MAX_CLOCK_ERROR * 1 / 100);
 
     // Set data rate and transmit power for uplink (note: txpow seems to be ignored by the library)
     LMIC_setDrTxpow(DR_SF12,14);
@@ -181,12 +183,12 @@ void onEvent (ev_t ev) {
   if (ev == EV_TXCOMPLETE) 
   {
       Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
-
-      // Send Done Command to Timer ic
-      digitalWrite(TIMER_DONE, HIGH);
 	
       // Schedule next transmission
       os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
+
+      // Send Done Command to Timer ic
+      digitalWrite(TIMER_DONE, HIGH);
   }
 }
 
@@ -206,7 +208,7 @@ void do_send(osjob_t* j){
     Serial.println(temperature);
 
     // Get weight
-    weight = loadcell.get_units(10);
+    weight = loadcell.get_units(10)/1000.0;
 
     // Get battery voltage
     int val=0;
@@ -224,8 +226,8 @@ void do_send(osjob_t* j){
         // Prepare upstream data transmission at the next possible time.
         lpp.reset();
         lpp.addTemperature(1, temperature);
-        lpp.addTemperature(2, weight);
-        lpp.addTemperature(3, voltage);
+        lpp.addAnalogInput(2, weight);
+        lpp.addAnalogInput(3, voltage);
         //lpp.addRelativeHumidity(2, humidity);
         
         LMIC_setTxData2(1, lpp.getBuffer(), lpp.getSize(), 0);
