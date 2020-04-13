@@ -37,6 +37,7 @@
 //#define LOADCELL_OFFSET -6826
 #define LOADCELL_DIVIDER -22.7f
 #define LOADCELL_OFFSET 156250
+#define TEMP_COMPENSATION 0.0733f // Kilogramm/Grad
 
 
 
@@ -215,6 +216,9 @@ void do_send(osjob_t* j){
     sensors.requestTemperatures();
     temperature = sensors.getTempCByIndex(0);
     Serial.println(temperature);
+
+    // Temperature compensation of weight
+    weight = weight + ( TEMP_COMPENSATION * ( 20.0 - temperature ));
    
     // Check if there is not a current TX/RX job running
     if (LMIC.opmode & OP_TXRXPEND) 
