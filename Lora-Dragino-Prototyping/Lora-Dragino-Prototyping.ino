@@ -202,11 +202,6 @@ void do_send(osjob_t* j){
     float weight;
     float voltage;
 
-    // Send the command to get temperatures
-    sensors.requestTemperatures();
-    temperature = sensors.getTempCByIndex(0);
-    Serial.println(temperature);
-
     // Get weight
     weight = loadcell.get_units(10)/1000.0;
 
@@ -215,6 +210,11 @@ void do_send(osjob_t* j){
     val = analogRead(BATTERY_VOLTAGE);
     voltage = (float)val/1024.0*5.0;
     voltage = voltage * 3.2;
+
+    // Send the command to get temperatures
+    sensors.requestTemperatures();
+    temperature = sensors.getTempCByIndex(0);
+    Serial.println(temperature);
    
     // Check if there is not a current TX/RX job running
     if (LMIC.opmode & OP_TXRXPEND) 
