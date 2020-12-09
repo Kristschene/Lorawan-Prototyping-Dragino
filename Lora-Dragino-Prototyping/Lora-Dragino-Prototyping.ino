@@ -15,7 +15,7 @@
 // Include library for HX711 (weightsensor)
 #include <HX711.h>
 
-
+//#define DEBUG
 
 /*---------------------------------------- DEFINES ---------------------------------------------- */
 // Temp sensor
@@ -25,19 +25,25 @@
 #define LOADCELL_DOUT_PIN 3
 #define LOADCELL_SCK_PIN 4
 
-// Timer IC
-#define TIMER_DONE A1
-
 // Battery Meaurement
-#define BATTERY_VOLTAGE A0
+#define BATTERY_VOLTAGE A1
 
+// Battery Measurement Activation
+#define BATT_MEASURE_ACT A0
+
+// Timer IC DONE
+#define TIMER_DONE A2
 
 // HX711 Adjustment
-//#define LOADCELL_DIVIDER 23.01458f
-//#define LOADCELL_OFFSET -6826
-#define LOADCELL_DIVIDER -22.7f
-#define LOADCELL_OFFSET 156250
-#define TEMP_COMPENSATION 0.0733f // Kilogramm/Grad
+// Ref weigth cell to be connected to Channel B
+#define LOADCELL_DIVIDER -22.7f //23.01458f
+#define LOADCELL_OFFSET 0 
+
+// Offset values
+// Reference value for compare weight cells @23,25C° 
+#define REF_WEIGHT_CELL_OFFSET 11710
+#define MAIN_WEIGHT_CELL_OFFSET 7280
+
 
 
 
@@ -98,6 +104,10 @@ void setup() {
     // Inititialize Timer IC Done pin and set it to LOW
     pinMode(TIMER_DONE, OUTPUT);
     digitalWrite(TIMER_DONE, LOW);
+
+    // Inititialize Battery Measurement Activation pin and set it to LOW
+    pinMode(BATT_MEASURE_ACT, OUTPUT);
+    digitalWrite(BATT_MEASURE_ACT, HIGH);
     
 	  // Initialize serial interface with 9600 Baud-Rate
     Serial.begin(9600);
@@ -138,9 +148,13 @@ void setup() {
     loadcell.set_offset(LOADCELL_OFFSET);// * LOADCELL_DIVIDER);
 
     //loadcell.tare();
+    delay(500);
 
+#ifndef DEBUG
     // Start job manually once; afterwards it will be started every defined seconds (see variable TX_INTERVAL )
     do_send(&sendjob);
+#endif
+
 }
 
 
@@ -148,30 +162,58 @@ void setup() {
 // Loop will be processed after setup for infinite times
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void loop() {   
-
+  
+#ifndef DEBUG
 	// Let LMIC run in loop
   os_runloop_once(); 
+#endif
 
+#ifdef DEBUG
   //Serial.println(loadcell.read_average(5));
   //Serial.println(loadcell.get_units(10), 2);
 
   // Battery Measurement
-  /*int val=0;
+  int val=0;
   float voltage;
+
+  delay(1000);
+
+   // Get weight channel A
+  float weight_A;
+  loadcell.set_gain(128u);
+  weight_A = loadcell.get_units(10)/1000.0;
+  Serial.print("Weight:       ");
+  Serial.println(weight_A); 
+
+  delay(1000);
+  
+  // Get weight channel B
+  float weight_B;
+  loadcell_A.set_gain(32u);
+  weight_B = loadcell.get_units(10)*4/1000.0;
+  Serial.print("Weight:       ");
+  Serial.println(weight_B);
+  
   val = analogRead(BATTERY_VOLTAGE);
   voltage = (float)val/1024.0*5.0;
+  Serial.print("ADC-Value:    ");
   Serial.println(val);
-  Serial.println(voltage);
+  //Serial.println(voltage);
   voltage = voltage * 3.2;
   
-  Serial.println(voltage);*/
+  Serial.print("Voltage:      ");
+  Serial.println(voltage);
 
-  // Get weight
-  /*float weight;
-  weight = loadcell.get_units(10);///1000.0;
-  Serial.println(weight);
+  // Send the command to get temperatures
+  float temperature;
+  sensors.requestTemperatures();
+  temperature = sensors.getTempCByIndex(0);
+  Serial.print("Temperature:  ");
+  Serial.println(temperature);
+
+#endif
   
-  delay(500);*/
+  //delay(1000);
 }
 
 
@@ -203,22 +245,40 @@ void do_send(osjob_t* j){
     float weight;
     float voltage;
 
-    // Get weight
-    weight = loadcell.get_units(10)/1000.0;
+    // Get weight channel A
+    float weight_A;
+    loadcell.set_gain(128u);
+    weight_A = (loadcell.get_units(10)+MAIN_WEIGHT_CELL_OFFSET)/1000.0;
+    Serial.print("Weight main cells:  ");
+    Serial.println(weight_A); 
+    
+    // Get weight channel B
+    float weight_B;
+    loadcell.set_gain(32u);
+    weight_B = (loadcell.get_units(10)*4+REF_WEIGHT_CELL_OFFSET)/1000.0;
+    Serial.print("Weight ref cells:   ");
+    Serial.println(weight_B);
 
     // Get battery voltage
+    // Serial resistors 22kOhm & 10kOhm
     int val=0;
     val = analogRead(BATTERY_VOLTAGE);
-    voltage = (float)val/1024.0*5.0;
+    voltage = (float)val/1023.0*5.0; // 4Volts because when arduino is powered by VIN the 5V reference for analog input drops to 4V
     voltage = voltage * 3.2;
+    Serial.print("Battery voltage:    ");
+    Serial.println(voltage);
 
+    delay(200);
     // Send the command to get temperatures
     sensors.requestTemperatures();
     temperature = sensors.getTempCByIndex(0);
+    Serial.print("Temperature:        ");
     Serial.println(temperature);
 
     // Temperature compensation of weight
-    weight = weight + ( TEMP_COMPENSATION * ( 20.0 - temperature ));
+    weight = weight_A - weight_B;
+    Serial.print("Weight comp.:       ");
+    Serial.println(weight);
    
     // Check if there is not a current TX/RX job running
     if (LMIC.opmode & OP_TXRXPEND) 
@@ -230,8 +290,10 @@ void do_send(osjob_t* j){
         // Prepare upstream data transmission at the next possible time.
         lpp.reset();
         lpp.addTemperature(1, temperature);
-        lpp.addAnalogInput(2, weight);
-        lpp.addAnalogInput(3, voltage);
+        lpp.addAnalogInput(2, weight_A);
+        lpp.addAnalogInput(3, weight_B);
+        lpp.addAnalogInput(4, weight);
+        lpp.addAnalogInput(5, voltage);
         //lpp.addRelativeHumidity(2, humidity);
         
         LMIC_setTxData2(1, lpp.getBuffer(), lpp.getSize(), 0);
